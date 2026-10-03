@@ -3,11 +3,10 @@ package main
 import (
 	"net/http"
 	"os"
+	"son514/kyc-integration/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-
-	"son514/kyc-integration/models"
 )
 
 func createSession(kyc *models.KYC) gin.HandlerFunc {
@@ -28,6 +27,18 @@ func createSession(kyc *models.KYC) gin.HandlerFunc {
 	}
 }
 
+func checkSession(kyc *models.KYC) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		decision, err := kyc.CheckSession(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, decision)
+	}
+}
+
 func main() {
 	godotenv.Load()
 
@@ -35,6 +46,7 @@ func main() {
 
 	router := gin.Default()
 	router.POST("/kyc/sessions", createSession(kyc))
+	router.POST("/kyc/sessions/:id", checkSession(kyc))
 	router.Static("/web", "./web")
 	router.Run()
 }

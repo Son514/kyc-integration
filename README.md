@@ -30,10 +30,11 @@ Loaded from `kyc-integration/.env` via `godotenv`.
 
 ## Endpoints
 
-| Method | Path            | Description                                        |
-| ------ | --------------- | -------------------------------------------------- |
-| POST   | `/kyc/sessions` | Creates a Didit verification session and returns it |
-| GET    | `/web/`         | Test UI for creating sessions                      |
+| Method | Path               | Description                                        |
+| ------ | ------------------ | -------------------------------------------------- |
+| POST   | `/kyc/sessions`    | Creates a Didit verification session and returns it |
+| POST   | `/kyc/sessions/:id`| Returns the session's current status               |
+| GET    | `/web/`            | Test UI for creating sessions                      |
 
 Request body:
 
@@ -67,5 +68,7 @@ cd kyc-integration && go run .
 ```
 
 Then open **http://localhost:8080/web/** and paste a published KYC `workflow_id` into the form. The page creates a session and opens Didit's hosted verification flow in a modal.
+
+The same page checks a session's status: creating a session fills in the `session_id` field, which you can also paste over. Click **Check status** to read the current status.
 
 The UI must be served over HTTP rather than opened as a file: the verification flow needs camera access, which browsers only allow in a secure context.

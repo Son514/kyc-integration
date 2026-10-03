@@ -72,6 +72,15 @@
 
   <div id="result"></div>
 
+  <h2>Session status</h2>
+  <label for="session_id">session_id <span>— filled in automatically after creating a session</span></label>
+  <input id="session_id" type="text" placeholder="11111111-2222-3333-4444-555555555555" autocomplete="off" spellcheck="false" />
+  <div class="row">
+    <button id="check">Check status</button>
+  </div>
+
+  <div id="decision"></div>
+
   <script src="https://unpkg.com/@didit-protocol/sdk-web/dist/didit-sdk.umd.min.js"></script>
   <script>
     const sdkAvailable = typeof DiditSDK !== "undefined";
@@ -95,13 +104,19 @@
     const vendorInput = document.getElementById("vendor_data");
     const msg = document.getElementById("msg");
     const result = document.getElementById("result");
+    const checkBtn = document.getElementById("check");
+    const sessionInput = document.getElementById("session_id");
+    const decision = document.getElementById("decision");
 
     workflowInput.value = localStorage.getItem("workflow_id") ?? "";
     vendorInput.value = localStorage.getItem("vendor_data") ?? "test-user-1";
+    sessionInput.value = localStorage.getItem("session_id") ?? "";
     workflowInput.addEventListener("change", () => localStorage.setItem("workflow_id", workflowInput.value.trim()));
     vendorInput.addEventListener("change", () => localStorage.setItem("vendor_data", vendorInput.value.trim()));
+    sessionInput.addEventListener("change", () => localStorage.setItem("session_id", sessionInput.value.trim()));
 
     createBtn.addEventListener("click", createSession);
+    checkBtn.addEventListener("click", checkStatus);
     openBtn.addEventListener("click", () => {
       if (!sdkAvailable) {
         show("error", "Didit SDK unavailable", "The SDK script from unpkg did not load, so the modal cannot open. Use the session url link above instead.");
@@ -152,7 +167,40 @@
       render(payload);
       openBtn.dataset.url = payload.url;
       openBtn.disabled = false;
+      sessionInput.value = payload.session_id;
+      localStorage.setItem("session_id", payload.session_id);
       show("ok", "Session created", `${payload.session_id} — ${payload.status}`);
+    }
+
+    async function checkStatus() {
+      const session_id = sessionInput.value.trim();
+
+      if (!session_id) {
+        show("error", "session_id is required", "Create a session first, or paste a session_id.");
+        return;
+      }
+
+      checkBtn.disabled = true;
+      show("info", "Checking status", `POST /kyc/sessions/${session_id}`);
+
+      let payload;
+      try {
+        const res = await fetch("/kyc/sessions/" + encodeURIComponent(session_id), { method: "POST" });
+        payload = await res.json();
+        if (!res.ok) {
+          show("error", `Request failed (${res.status})`, payload.error ?? JSON.stringify(payload));
+          decision.innerHTML = "";
+          return;
+        }
+      } catch (err) {
+        show("error", "Could not reach the API", err.message);
+        return;
+      } finally {
+        checkBtn.disabled = false;
+      }
+
+      renderDecision(payload);
+      show("ok", `Status: ${payload.status}`, `session_id: ${payload.session_id}`);
     }
 
     function render(session) {
@@ -180,6 +228,35 @@
       result.innerHTML = `
         <h2>Session</h2>
         <table>${rows}${url}</table>
+        <h2>Raw response</h2>
+        <pre>${escape(JSON.stringify(session, null, 2))}</pre>
+      `;
+    }
+
+    function renderDecision(session) {
+      const fields = [
+        ["session_id", session.session_id],
+        ["session_kind", session.session_kind],
+        ["session_number", session.session_number],
+        ["status", session.status],
+        ["workflow_id", session.workflow_id],
+        ["vendor_data", session.vendor_data],
+        ["created_at", session.created_at],
+        ["expires_at", session.expires_at],
+      ];
+
+      const rows = fields
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([key, value]) => `<tr><th>${key}</th><td>${escape(String(value))}</td></tr>`)
+        .join("");
+
+      const sessionUrl = session.session_url
+        ? `<tr><th>session_url</th><td><a href="${escape(session.session_url)}" target="_blank" rel="noopener">${escape(session.session_url)}</a></td></tr>`
+        : "";
+
+      decision.innerHTML = `
+        <h2>Decision</h2>
+        <table>${rows}${sessionUrl}</table>
         <h2>Raw response</h2>
         <pre>${escape(JSON.stringify(session, null, 2))}</pre>
       `;
