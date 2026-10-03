@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KYC Session Tester</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 1rem; margin: 2rem 0 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; }
+    p.sub { margin: 0 0 1.5rem; opacity: 0.7; font-size: 0.9rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+    label span { font-weight: 400; opacity: 0.6; }
+    input {
+      width: 100%; padding: 0.5rem 0.6rem; margin-bottom: 1rem;
+      border: 1px solid rgba(128,128,128,0.4); border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem;
+      background: transparent; color: inherit;
+    }
+    input:focus { outline: 2px solid #4c8bf5; outline-offset: -1px; }
+    button {
+      padding: 0.6rem 1.1rem; border: 0; border-radius: 6px;
+      background: #4c8bf5; color: #fff; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: transparent; color: inherit; border: 1px solid rgba(128,128,128,0.5); margin-left: 0.5rem; }
+    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .note { font-size: 0.8rem; opacity: 0.65; margin-top: 0.75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(128,128,128,0.25); vertical-align: top; }
+    th { width: 11rem; font-weight: 600; opacity: 0.75; }
+    td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    pre {
+      background: rgba(128,128,128,0.12); padding: 0.75rem; border-radius: 6px;
+      font-size: 0.8rem; overflow-x: auto; margin: 0;
+    }
+    .msg { padding: 0.6rem 0.75rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+    .msg.error { display: block; background: rgba(220,60,60,0.15); border: 1px solid rgba(220,60,60,0.45); }
+    .msg.ok { display: block; background: rgba(40,170,90,0.15); border: 1px solid rgba(40,170,90,0.45); }
+    .msg.info { display: block; background: rgba(76,139,245,0.12); border: 1px solid rgba(76,139,245,0.4); }
+    .msg b { display: block; margin-bottom: 0.2rem; }
+  </style>
+</head>
+<body>
+  <h1>KYC Session Tester</h1>
+  <p class="sub">Creates a Didit verification session via <code>POST /kyc/sessions</code>, then opens Didit's hosted flow in a modal.</p>
+
+  <div id="msg" class="msg"></div>
+
+  <h2>Request</h2>
+  <label for="workflow_id">workflow_id <span>— required, KYC workflow UUID from the Didit console</span></label>
+  <input id="workflow_id" type="text" placeholder="11111111-2222-3333-4444-555555555555" autocomplete="off" spellcheck="false" />
+
+  <label for="vendor_data">vendor_data <span>— your user identifier</span></label>
+  <input id="vendor_data" type="text" placeholder="test-user-1" autocomplete="off" spellcheck="false" />
+
+  <div class="row">
+    <button id="create">Create session</button>
+    <button id="open" class="secondary" disabled>Open verification</button>
+  </div>
+  <p class="note">
+    Reusing the same <code>workflow_id</code> + <code>vendor_data</code> returns the existing unfinished session
+    rather than creating a new one. Change <code>vendor_data</code> to force a fresh session.
+  </p>
+
+  <div id="result"></div>
+
+  <script src="https://unpkg.com/@didit-protocol/sdk-web/dist/didit-sdk.umd.min.js"></script>
+  <script>
+    const sdkAvailable = typeof DiditSDK !== "undefined";
+    const DiditSdk = sdkAvailable ? DiditSDK.DiditSdk : null;
+
+    if (DiditSdk) {
+      DiditSdk.shared.onComplete = (result) => {
+        if (result.type === "completed") {
+          show("ok", "Verification completed", `sessionId: ${result.session?.sessionId ?? "unknown"} — status: ${result.session?.status ?? "unknown"}`);
+        } else if (result.type === "cancelled") {
+          show("info", "Verification cancelled", result.session?.sessionId ? `sessionId: ${result.session.sessionId}` : "");
+        } else {
+          show("error", "Verification failed", `${result.error?.type}: ${result.error?.message}`);
+        }
+      };
+    }
+
+    const createBtn = document.getElementById("create");
+    const openBtn = document.getElementById("open");
+    const workflowInput = document.getElementById("workflow_id");
+    const vendorInput = document.getElementById("vendor_data");
+    const msg = document.getElementById("msg");
+    const result = document.getElementById("result");
+
+    workflowInput.value = localStorage.getItem("workflow_id") ?? "";
+    vendorInput.value = localStorage.getItem("vendor_data") ?? "test-user-1";
+    workflowInput.addEventListener("change", () => localStorage.setItem("workflow_id", workflowInput.value.trim()));
+    vendorInput.addEventListener("change", () => localStorage.setItem("vendor_data", vendorInput.value.trim()));
+
+    createBtn.addEventListener("click", createSession);
+    openBtn.addEventListener("click", () => {
+      if (!sdkAvailable) {
+        show("error", "Didit SDK unavailable", "The SDK script from unpkg did not load, so the modal cannot open. Use the session url link above instead.");
+        return;
+      }
+      DiditSdk.shared.startVerification({ url: openBtn.dataset.url });
+    });
+
+    async function createSession() {
+      const workflow_id = workflowInput.value.trim();
+      const vendor_data = vendorInput.value.trim();
+
+      if (!workflow_id) {
+        show("error", "workflow_id is required", "Paste the UUID of a published KYC workflow.");
+        return;
+      }
+      if (!sdkAvailable) {
+        show("error", "Didit SDK unavailable", "The SDK script from unpkg did not load. Check your network connection.");
+        return;
+      }
+
+      createBtn.disabled = true;
+      openBtn.disabled = true;
+      show("info", "Creating session", "POST /kyc/sessions");
+
+      let payload;
+      try {
+        const res = await fetch("/kyc/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow_id, ...(vendor_data && { vendor_data }) }),
+        });
+        payload = await res.json();
+        if (!res.ok) {
+          show("error", `Request failed (${res.status})`, payload.error ?? JSON.stringify(payload));
+          return;
+        }
+      } catch (err) {
+        show("error", "Could not reach the API", err.message);
+        return;
+      } finally {
+        createBtn.disabled = false;
+      }
+
+      localStorage.setItem("workflow_id", workflow_id);
+      if (vendor_data) localStorage.setItem("vendor_data", vendor_data);
+
+      render(payload);
+      openBtn.dataset.url = payload.url;
+      openBtn.disabled = false;
+      show("ok", "Session created", `${payload.session_id} — ${payload.status}`);
+    }
+
+    function render(session) {
+      const fields = [
+        ["session_id", session.session_id],
+        ["session_kind", session.session_kind],
+        ["session_number", session.session_number],
+        ["session_token", session.session_token],
+        ["status", session.status],
+        ["workflow_id", session.workflow_id],
+        ["workflow_version", session.workflow_version],
+        ["vendor_data", session.vendor_data],
+        ["callback", session.callback],
+      ];
+
+      const rows = fields
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([key, value]) => `<tr><th>${key}</th><td>${escape(String(value))}</td></tr>`)
+        .join("");
+
+      const url = session.url
+        ? `<tr><th>url</th><td><a href="${escape(session.url)}" target="_blank" rel="noopener">${escape(session.url)}</a></td></tr>`
+        : "";
+
+      result.innerHTML = `
+        <h2>Session</h2>
+        <table>${rows}${url}</table>
+        <h2>Raw response</h2>
+        <pre>${escape(JSON.stringify(session, null, 2))}</pre>
+      `;
+    }
+
+    function show(kind, title, detail = "") {
+      msg.className = `msg ${kind}`;
+      msg.innerHTML = `<b>${escape(title)}</b>${detail ? escape(detail) : ""}`;
+    }
+
+    function escape(value) {
+      return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    }
+  </script>
+</body>
+</html>
